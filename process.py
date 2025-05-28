@@ -79,7 +79,7 @@ class Uls23(SegmentationAlgorithm):
     def load_estimators(self):
         estimators = [ XGBClassifier(random_state=42) for i in range(5)]
         for i,e in enumerate(estimators):
-            e.load_model(f'/input/xgb_{i}.bin')
+            e.load_model(f'/opt/ml/model/xgb_estimators/xgb_{i}.bin')
         return estimators
 
     def start_pipeline(self):
