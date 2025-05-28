@@ -206,12 +206,12 @@ class Uls23(SegmentationAlgorithm):
             
             # Predict class
             x = images_from_numpy(numpy_voi)
-            class_label = np.argmax((sum([ estimator.predict_proba([x]) for estimator in self.estimators ])))
+            class_label = int(np.argmax((sum([ estimator.predict_proba([x]) for estimator in self.estimators ]))))
             
-            if class_label != 5: # 5 equals lung
+            if class_label == 5: # 5 equals lung
                 voi = torch.from_numpy(numpy_voi)
             else:
-                voi = torch.from_numpy(np.zeros_like(numpy_voi))
+                voi = torch.from_numpy(numpy_voi)
             voi = voi.to(dtype=torch.float32)
 
             print(f'\nPredicting image of shape: {voi.shape}, spacing: {voi_spacing}')
