@@ -19,7 +19,7 @@ def calculate_real_size(img):
     return tuple(real_shape[::-1])
 
 def calculate_slides(np_img, axis=0): 
-    assert np_img.shape == (128, 256, 256)
+    assert np_img.shape == (64, 128, 128)
     mean_array = np.mean(np_img,axis=tuple([i for i in range(3) if i !=axis]))
     minimum=-1023
     if min(mean_array) < -1024:
@@ -33,7 +33,7 @@ def calculate_slides(np_img, axis=0):
             end = index
             break  
     if end==-1:
-        end= (128 if axis == 0 else 256)
+        end= (64 if axis == 0 else 128)
     return end-begin, begin, end
 
 def calculate_unpadded_size(np_img):
@@ -205,11 +205,11 @@ class Uls23(SegmentationAlgorithm):
             numpy_voi = np.load(f"/tmp/voi_{i}.npy")
             
             # Predict class
-            x = images_from_numpy(numpy_voi)
+            x = images_from_numpy(numpy_voi[0,:,:,:])
             class_label = int(np.argmax((sum([ estimator.predict_proba([x]) for estimator in self.estimators ]))))
-            
+        
             if class_label == 5: # 5 equals lung
-                voi = torch.from_numpy(numpy_voi)
+                voi = torch.from_numpy(np.zeros_like(numpy_voi))
             else:
                 voi = torch.from_numpy(numpy_voi)
             voi = voi.to(dtype=torch.float32)
