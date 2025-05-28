@@ -9,3 +9,5 @@ batchgenerators==0.23
 blosc2==2.5.1
 acvl_utils==0.2
 torch==2.5.1
+scikit-learn
+xgboost

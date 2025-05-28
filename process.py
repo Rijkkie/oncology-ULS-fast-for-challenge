@@ -10,7 +10,59 @@ from evalutils import SegmentationAlgorithm
 from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
 from nnunetv2.inference.export_prediction import convert_predicted_logits_to_segmentation_with_correct_shape
 from nnunetv2.utilities.helpers import empty_cache
+from xgboost import XGBClassifier
 
+def calculate_real_size(img):
+    shape = img.GetSize()
+    voxel_spacing = img.GetSpacing()
+    real_shape = [round(sh*vs,1) for sh,vs in zip(shape,voxel_spacing)]
+    return tuple(real_shape[::-1])
+
+def calculate_slides(np_img, axis=0): 
+    assert np_img.shape == (128, 256, 256)
+    mean_array = np.mean(np_img,axis=tuple([i for i in range(3) if i !=axis]))
+    minimum=-1023
+    if min(mean_array) < -1024:
+        minimum=-2048
+    begin = -1
+    end = -1
+    for index, mean in enumerate(mean_array):
+        if not np.isclose(mean,minimum,atol=1) and begin < 0:
+            begin = index
+        elif begin >= 0 and end < 0 and np.isclose(mean,minimum,atol=1):
+            end = index
+            break  
+    if end==-1:
+        end= (128 if axis == 0 else 256)
+    return end-begin, begin, end
+
+def calculate_unpadded_size(np_img):
+    return tuple([ calculate_slides(np_img,axis=i)[0] for i in range(3)])
+
+def images_from_numpy(hu_image):   
+    sitk_image = sitk.GetImageFromArray(hu_image)
+    hu_unpadded = hu_image[hu_image>-2048] if np.min(hu_image) < -1024 else hu_image[hu_image>-1024]
+    # , "Real size" : calculate_real_size(sitk_image)
+    stats_dict = {}
+    z, x, y = calculate_unpadded_size(hu_image)
+    z_real, x_real, y_real = calculate_real_size(sitk_image)
+    stats_dict["x_unpadded"] = x
+    stats_dict["y_unpadded"] = y
+    stats_dict["z_unpadded"] = z
+    stats_dict["x_real"] = x_real
+    stats_dict["y_real"] = y_real
+    stats_dict["z_real"] = z_real
+    stats_dict["sum"] = np.sum(hu_unpadded)
+    stats_dict["voxels"] = len(hu_unpadded)
+    stats_dict["mean"] = np.mean(hu_unpadded)
+    stats_dict["std"] = np.std(hu_unpadded)
+    stats_dict["median"] = np.median(hu_unpadded)
+    stats_dict["min"] = np.min(hu_unpadded)
+    stats_dict["max"] = np.max(hu_unpadded)
+    hist, _ = np.histogram(hu_unpadded,bins=np.linspace(-1000,3000,81))
+    for i,h in enumerate(hist):
+        stats_dict[f"hist_{int(np.linspace(-1000,3000,81)[i])}"] = h/len(hu_unpadded)
+    return tuple(stats_dict.values())
 
 class Uls23(SegmentationAlgorithm):
     def __init__(self):
@@ -22,6 +74,13 @@ class Uls23(SegmentationAlgorithm):
         self.xy_size_model = 128 # Number of voxels in the xy-dimensions that the model takes
         self.device = torch.device("cuda")
         self.predictor = None # nnUnet predictor
+        self.estimators = self.load_estimators()
+        
+    def load_estimators(self):
+        estimators = [ XGBClassifier(random_state=42) for i in range(5)]
+        for i,e in enumerate(estimators):
+            e.load_model(f'/input/xgb_{i}.bin')
+        return estimators
 
     def start_pipeline(self):
         """
@@ -34,7 +93,7 @@ class Uls23(SegmentationAlgorithm):
 
         self.load_model()
         spacings = self.load_data()
-        predictions = self.predict(spacings)
+        predictions = self.predict_with_classifier(spacings)
         self.postprocess(predictions)
 
         end_time = time.time()
@@ -131,7 +190,39 @@ class Uls23(SegmentationAlgorithm):
 
 
         return spacings
+    
+    def predict_with_classifier(self, spacings):
+        """
+        Runs nnUnet inference on the images, then moves to post-processing
+        :param spacings: list containing the spacing per VOI
+        :return: list of numpy arrays containing the predicted lesion masks per VOI
+        """
+        start_inference_time = time.time()
+        predictions = []
+        
+        for i, voi_spacing in enumerate(spacings):
+            # Load the 3D array from the binary file
+            numpy_voi = np.load(f"/tmp/voi_{i}.npy")
+            
+            # Predict class
+            x = images_from_numpy(numpy_voi)
+            class_label = np.argmax((sum([ estimator.predict_proba([x]) for estimator in self.estimators ])))
+            
+            if class_label != 5: # 5 equals lung
+                voi = torch.from_numpy(numpy_voi)
+            else:
+                voi = torch.from_numpy(np.zeros_like(numpy_voi))
+            voi = voi.to(dtype=torch.float32)
 
+            print(f'\nPredicting image of shape: {voi.shape}, spacing: {voi_spacing}')
+            predictions.append(self.predictor.predict_single_npy_array(voi, {'spacing': voi_spacing}, None, None, False))
+            
+
+        end_inference_time = time.time()
+        print(f"Total inference runtime: {end_inference_time - start_inference_time}s")
+        return predictions
+
+        
     def predict(self, spacings):
         """
         Runs nnUnet inference on the images, then moves to post-processing
@@ -143,7 +234,9 @@ class Uls23(SegmentationAlgorithm):
         
         for i, voi_spacing in enumerate(spacings):
             # Load the 3D array from the binary file
-            voi = torch.from_numpy(np.load(f"/tmp/voi_{i}.npy"))
+            numpy_voi = np.load(f"/tmp/voi_{i}.npy")
+            
+            voi = torch.from_numpy(numpy_voi)
             voi = voi.to(dtype=torch.float32)
 
             print(f'\nPredicting image of shape: {voi.shape}, spacing: {voi_spacing}')
