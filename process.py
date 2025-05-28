@@ -93,7 +93,7 @@ class Uls23(SegmentationAlgorithm):
 
         self.load_model()
         spacings = self.load_data()
-        predictions = self.predict_with_classifier(spacings)
+        predictions = self.predict(spacings)
         self.postprocess(predictions)
 
         end_time = time.time()
