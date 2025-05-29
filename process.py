@@ -8,9 +8,9 @@ import numpy as np
 from pathlib import Path
 from evalutils import SegmentationAlgorithm
 from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
-from nnunetv2.inference.export_prediction import convert_predicted_logits_to_segmentation_with_correct_shape
-from nnunetv2.utilities.helpers import empty_cache
 from xgboost import XGBClassifier
+
+
 
 
 def calculate_real_size(img):
@@ -82,6 +82,7 @@ class Uls23(SegmentationAlgorithm):
         self.xy_size_model = 128  # Number of voxels in the xy-dimensions that the model takes
         self.device = torch.device("cuda")
         self.predictor = None  # nnUnet predictor
+        self.predictor_pancreas = None
         self.estimators = self.load_estimators()
 
     def load_estimators(self):
@@ -98,8 +99,7 @@ class Uls23(SegmentationAlgorithm):
 
         # We need to create the correct output folder, determined by the interface, ourselves
         os.makedirs("/output/images/ct-binary-uls/", exist_ok=True)
-
-        self.load_model()
+        self.load_models()
         spacings = self.load_data()
         predictions = self.predict_with_classifier(spacings)
         self.postprocess(predictions)
@@ -107,7 +107,7 @@ class Uls23(SegmentationAlgorithm):
         end_time = time.time()
         print(f"Total job runtime: {end_time - start_time}s")
 
-    def load_model(self):
+    def load_models(self):
         start_model_load_time = time.time()
 
         # Set up the nnUNetPredictor
@@ -128,7 +128,31 @@ class Uls23(SegmentationAlgorithm):
         )
         end_model_load_time = time.time()
         print(
-            f"Model loading runtime: {end_model_load_time - start_model_load_time}s")
+            f"Base model loading runtime: {end_model_load_time - start_model_load_time}s")
+        
+        # Expert model (trained on only pancreas)
+        
+        start_model_load_time = time.time()
+
+        # Set up the nnUNetPredictor
+        self.predictor_pancreas = nnUNetPredictor(
+            tile_step_size=0.5,
+            use_gaussian=True,
+            use_mirroring=False,  # False is faster but less accurate
+            device=self.device,
+            verbose=False,
+            verbose_preprocessing=False,
+            allow_tqdm=False
+        )
+        # Initialize the network architecture, loads the checkpoint
+        self.predictor_pancreas.initialize_from_trained_model_folder(
+            "/opt/ml/model/Dataset012_diag_pancreasCT/nnUNetTrainer_Lovasz__nnUNetPlans__3d_fullres",
+            use_folds= (0,),
+            checkpoint_name="checkpoint_best.pth",
+        )
+        end_model_load_time = time.time()
+        print(
+            f"Pancreas model loading runtime: {end_model_load_time - start_model_load_time}s")
 
     def load_data(self):
         """
@@ -222,18 +246,27 @@ class Uls23(SegmentationAlgorithm):
             # Predict class
             x = images_from_numpy(numpy_voi[0, :, :, :])
             class_label = int(np.argmax(
-                (sum([estimator.predict_proba([x]) for estimator in self.estimators]))))
+                (sum(estimator.predict_proba([x]) for estimator in self.estimators))))
 
-            if class_label == 5:  # 5 equals lung
-                voi = torch.from_numpy(np.zeros_like(numpy_voi))
-            else:
-                voi = torch.from_numpy(numpy_voi)
+            
+            voi = torch.from_numpy(numpy_voi)
             voi = voi.to(dtype=torch.float32)
+
 
             print(
                 f'\nPredicting image of shape: {voi.shape}, spacing: {voi_spacing}')
-            predictions.append(self.predictor.predict_single_npy_array(
-                voi, {'spacing': voi_spacing}, None, None, False))
+            
+            if class_label == 9:  # 5 equals lung
+                seg, probs_panc = self.predictor_pancreas.predict_single_npy_array(
+                    voi, {'spacing': voi_spacing}, None, None, True)
+                _, probs_base = self.predictor.predict_single_npy_array(
+                    voi, {'spacing': voi_spacing}, None, None, True)
+                prob_ensemble = 0.8*probs_panc+0.2*probs_base
+                print(prob_ensemble.shape, seg.shape)
+                predictions.append(self.prob_to_seg(voi,prob_ensemble,{'spacing': voi_spacing}))
+            else:
+                predictions.append(self.predictor.predict_single_npy_array(
+                    voi, {'spacing': voi_spacing}, None, None, False))
 
         end_inference_time = time.time()
         print(
