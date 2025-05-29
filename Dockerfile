@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.2.0-runtime-ubuntu20.04 AS base
+FROM nvidia/cuda:12.9.0-runtime-ubuntu20.04 AS base
 
 RUN rm /etc/apt/sources.list.d/cuda.list
 
@@ -11,8 +11,8 @@ RUN apt-get update && \
   wget \
   unzip \
   libopenblas-dev \
-  python3.9 \
-  python3.9-dev \
+  python3.10 \
+  python3.10-dev \
   python3-pip \
   nano \
   && \
@@ -21,9 +21,10 @@ RUN apt-get update && \
   rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip
-RUN python3.9 -m pip install --no-cache-dir --upgrade pip
+RUN pip3 install setuptools
+RUN pip3 install --no-cache-dir --upgrade pip
 COPY requirements.txt /tmp/requirements.txt
-RUN python3.9 -m pip install --no-cache-dir -r /tmp/requirements.txt -f https://download.pytorch.org/whl/torch_stable.html
+RUN pip3 install --no-cache-dir -r /tmp/requirements.txt
 
 # Configure Git, clone the repository without checking out, then checkout the specific commit
 RUN git clone --no-checkout https://github.com/MIC-DKFZ/nnUNet.git /opt/algorithm/nnunet/
@@ -71,4 +72,4 @@ ENV nnUNet_raw="/opt/algorithm/nnunet/nnUNet_raw" \
     nnUNet_preprocessed="/opt/algorithm/nnunet/nnUNet_preprocessed" \
     nnUNet_results="/opt/algorithm/nnunet/nnUNet_results"
 
-ENTRYPOINT [ "python3.9", "-m", "process" ]
+ENTRYPOINT [ "python3.10", "-m", "process" ]

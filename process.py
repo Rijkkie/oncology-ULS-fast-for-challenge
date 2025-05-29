@@ -99,39 +99,15 @@ class Uls23(SegmentationAlgorithm):
 
         # We need to create the correct output folder, determined by the interface, ourselves
         os.makedirs("/output/images/ct-binary-uls/", exist_ok=True)
-        self.load_models()
+        self.load_model()
         spacings = self.load_data()
-        predictions = self.predict_with_classifier(spacings)
+        predictions = self.predict(spacings)
         self.postprocess(predictions)
 
         end_time = time.time()
         print(f"Total job runtime: {end_time - start_time}s")
 
-    def load_models(self):
-        start_model_load_time = time.time()
-
-        # Set up the nnUNetPredictor
-        self.predictor = nnUNetPredictor(
-            tile_step_size=0.5,
-            use_gaussian=True,
-            use_mirroring=False,  # False is faster but less accurate
-            device=self.device,
-            verbose=False,
-            verbose_preprocessing=False,
-            allow_tqdm=False
-        )
-        # Initialize the network architecture, loads the checkpoint
-        self.predictor.initialize_from_trained_model_folder(
-            "/opt/ml/model/Dataset601_Full_128_64/nnUNetTrainer_ULS_500_QuarterLR__nnUNetPlans_shallow__3d_fullres_resenc",
-            use_folds=("all"),
-            checkpoint_name="checkpoint_best.pth",
-        )
-        end_model_load_time = time.time()
-        print(
-            f"Base model loading runtime: {end_model_load_time - start_model_load_time}s")
-        
-        # Expert model (trained on only pancreas)
-        
+    def load_model(self):
         start_model_load_time = time.time()
 
         # Set up the nnUNetPredictor
@@ -284,10 +260,7 @@ class Uls23(SegmentationAlgorithm):
 
         for i, voi_spacing in enumerate(spacings):
             # Load the 3D array from the binary file
-            numpy_voi = np.load(f"/tmp/voi_{i}.npy")
-
-            voi = torch.from_numpy(numpy_voi)
-            voi = voi.to(dtype=torch.float32)
+            voi = np.load(f"/tmp/voi_{i}.npy").astype(np.float32)
 
             print(
                 f'\nPredicting image of shape: {voi.shape}, spacing: {voi_spacing}')
