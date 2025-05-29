@@ -21,16 +21,16 @@ RUN apt-get update && \
   rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip
-RUN pip3 install setuptools
-RUN pip3 install --no-cache-dir --upgrade pip
+RUN pip install setuptools
+RUN pip install --no-cache-dir --upgrade pip
 COPY requirements.txt /tmp/requirements.txt
-RUN pip3 install --no-cache-dir -r /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 # Configure Git, clone the repository without checking out, then checkout the specific commit
 RUN git clone --no-checkout https://github.com/MIC-DKFZ/nnUNet.git /opt/algorithm/nnunet/
 
 # Install a few dependencies that are not automatically installed
-RUN pip3 install \
+RUN pip install \
         -e /opt/algorithm/nnunet \
         graphviz \
         onnx \
