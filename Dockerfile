@@ -3,6 +3,7 @@ FROM nvidia/cuda:12.2.0-runtime-ubuntu20.04 AS base
 RUN rm /etc/apt/sources.list.d/cuda.list
 
 RUN apt-get update && \
+  apt-get clean && \
   apt-get install -y software-properties-common && \
   add-apt-repository ppa:deadsnakes/ppa && \
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
