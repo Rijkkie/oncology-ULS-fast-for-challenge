@@ -58,16 +58,13 @@ COPY --chown=user:user export2onnx.py /opt/app/
 ### ALGORITHM
 
 # Copy custom trainers to docker
-COPY --chown=user:user ./architecture/extensions/nnunetv2/ /opt/algorithm/nnunet/nnunetv2/
-
-# Copy xgb weights
-COPY --chown=user:user /xgb_estimators/ /opt/ml/model/xgb_estimators/
+# COPY --chown=user:user ./architecture/extensions/nnunetv2/ /opt/algorithm/nnunet/nnunetv2/
 
 # Copy model checkpoint to docker (uncomment if you put the model weights directly in this repo)
-COPY --chown=user:user ./architecture/nnUNet_results/ /opt/ml/model/
+# COPY --chown=user:user ./architecture/nnUNet_results/ /opt/ml/model/
 
 # Copy container testing data to docker (uncomment if you want to see if the model works and put a test image and spacing in this repo)
-COPY --chown=user:user /architecture/input/ /input/
+# COPY --chown=user:user /architecture/input/ /input/
 
 # Set environment variable defaults
 ENV nnUNet_raw="/opt/algorithm/nnunet/nnUNet_raw" \

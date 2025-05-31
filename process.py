@@ -80,9 +80,9 @@ class Uls23(SegmentationAlgorithm):
         self.xy_size = 256  # Number of voxels in the xy-dimensions for each input VOI
         self.z_size_model = 64  # Number of voxels in the z-dimension that the model takes
         self.xy_size_model = 128  # Number of voxels in the xy-dimensions that the model takes
-        self.device = torch.device("cuda")
+        self.device = torch.device("gpu")
         self.predictor = None  # nnUnet predictor
-        self.predictor_pancreas = None
+        self.predictor_bone = None
         self.estimators = self.load_estimators()
 
     def load_estimators(self):
@@ -111,6 +111,30 @@ class Uls23(SegmentationAlgorithm):
         start_model_load_time = time.time()
 
         # Set up the nnUNetPredictor
+        self.predictor_bone = nnUNetPredictor(
+            tile_step_size=0.5,
+            use_gaussian=True,
+            use_mirroring=False,  # False is faster but less accurate
+            device=self.device,
+            verbose=False,
+            verbose_preprocessing=False,
+            allow_tqdm=False
+        )
+        # Initialize the network architecture, loads the checkpoint
+        self.predictor_bone.initialize_from_trained_model_folder(
+            "/opt/ml/model/Dataset031_Bone/nnUNetTrainer_100epochs__nnUNetPlans__3d_fullres",
+            use_folds=(0,1,2,3,4),
+            checkpoint_name="checkpoint_best.pth",
+        )
+        end_model_load_time = time.time()
+        print(
+            f"Bone model loading runtime: {end_model_load_time - start_model_load_time}s")
+        
+        # Expert model (trained on only Bone)
+        
+        start_model_load_time = time.time()
+
+        # Set up the nnUNetPredictor
         self.predictor = nnUNetPredictor(
             tile_step_size=0.5,
             use_gaussian=True,
@@ -123,36 +147,13 @@ class Uls23(SegmentationAlgorithm):
         # Initialize the network architecture, loads the checkpoint
         self.predictor.initialize_from_trained_model_folder(
             "/opt/ml/model/Dataset601_Full_128_64/nnUNetTrainer_ULS_500_QuarterLR__nnUNetPlans_shallow__3d_fullres_resenc",
-            use_folds=("all"),
+            use_folds= ("all"),
             checkpoint_name="checkpoint_best.pth",
         )
+        # base model
         end_model_load_time = time.time()
         print(
             f"Base model loading runtime: {end_model_load_time - start_model_load_time}s")
-        
-        # Expert model (trained on only pancreas)
-        
-        start_model_load_time = time.time()
-
-        # Set up the nnUNetPredictor
-        self.predictor_pancreas = nnUNetPredictor(
-            tile_step_size=0.5,
-            use_gaussian=True,
-            use_mirroring=False,  # False is faster but less accurate
-            device=self.device,
-            verbose=False,
-            verbose_preprocessing=False,
-            allow_tqdm=False
-        )
-        # Initialize the network architecture, loads the checkpoint
-        self.predictor_pancreas.initialize_from_trained_model_folder(
-            "/opt/ml/model/Dataset012_diag_pancreasCT/nnUNetTrainer_Lovasz__nnUNetPlans__3d_fullres",
-            use_folds= (0,),
-            checkpoint_name="checkpoint_best.pth",
-        )
-        end_model_load_time = time.time()
-        print(
-            f"Pancreas model loading runtime: {end_model_load_time - start_model_load_time}s")
 
     def load_data(self):
         """
@@ -256,14 +257,9 @@ class Uls23(SegmentationAlgorithm):
             print(
                 f'\nPredicting image of shape: {voi.shape}, spacing: {voi_spacing}')
             
-            if class_label == 9:  # 5 equals lung
-                seg, probs_panc = self.predictor_pancreas.predict_single_npy_array(
-                    voi, {'spacing': voi_spacing}, None, None, True)
-                _, probs_base = self.predictor.predict_single_npy_array(
-                    voi, {'spacing': voi_spacing}, None, None, True)
-                prob_ensemble = 0.8*probs_panc+0.2*probs_base
-                print(prob_ensemble.shape, seg.shape)
-                predictions.append(self.prob_to_seg(voi,prob_ensemble,{'spacing': voi_spacing}))
+            if class_label == 1:  # 1 equals Bone
+                predictions.append(self.predictor_bone.predict_single_npy_array(
+                    voi, {'spacing': voi_spacing}, None, None, False))
             else:
                 predictions.append(self.predictor.predict_single_npy_array(
                     voi, {'spacing': voi_spacing}, None, None, False))
