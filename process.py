@@ -80,7 +80,7 @@ class Uls23(SegmentationAlgorithm):
         self.xy_size = 256  # Number of voxels in the xy-dimensions for each input VOI
         self.z_size_model = 64  # Number of voxels in the z-dimension that the model takes
         self.xy_size_model = 128  # Number of voxels in the xy-dimensions that the model takes
-        self.device = torch.device("gpu")
+        self.device = torch.device("cuda")
         self.predictor = None  # nnUnet predictor
         self.predictor_bone = None
         self.estimators = self.load_estimators()
