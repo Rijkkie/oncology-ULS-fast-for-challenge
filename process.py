@@ -81,8 +81,10 @@ class Uls23(SegmentationAlgorithm):
         self.z_size_model = 64  # Number of voxels in the z-dimension that the model takes
         self.xy_size_model = 128  # Number of voxels in the xy-dimensions that the model takes
         self.device = torch.device("cuda")
-        self.predictor = None  # nnUnet predictor
-        self.predictor_bone = None
+        self.predictor_other = None  # nnUnet predictor
+        self.predictor_pancreas = None
+        self.predictor_colon = None
+        self.predictor_abdominal = None
         self.estimators = self.load_estimators()
 
     def load_estimators(self):
@@ -101,61 +103,41 @@ class Uls23(SegmentationAlgorithm):
         os.makedirs("/output/images/ct-binary-uls/", exist_ok=True)
         self.load_models()
         spacings = self.load_data()
-        predictions = self.predict(spacings)
+        predictions = self.predict_with_classifier(spacings)
         self.postprocess(predictions)
 
         end_time = time.time()
         print(f"Total job runtime: {end_time - start_time}s")
-
-    def load_models(self):
+        
+    def load_model(self, dataset):
         start_model_load_time = time.time()
         print("start")
         # Set up the nnUNetPredictor
-        self.predictor_bone = nnUNetPredictor(
+        predictor = nnUNetPredictor(
             tile_step_size=0.5,
             use_gaussian=True,
-            use_mirroring=True,
-            perform_everything_on_device=False,
-            device=self.device,
-            verbose=False,
-            verbose_preprocessing=False,
-            allow_tqdm=True
-        )
-        # Initialize the network architecture, loads the checkpoint
-        self.predictor_bone.initialize_from_trained_model_folder(
-            "/opt/ml/model/Dataset012_diag_pancreasCT/nnUNetTrainer_Tversky__nnUNetPlans__3d_fullres",
-            use_folds=(0,),
-            checkpoint_name="checkpoint_final.pth",
-        )
-        end_model_load_time = time.time()
-        print(
-            f"Bone model loading runtime: {end_model_load_time - start_model_load_time}s")
-        
-        # Expert model (trained on only Bone)
-        
-        start_model_load_time = time.time()
-
-        # Set up the nnUNetPredictor
-        self.predictor = nnUNetPredictor(
-            tile_step_size=0.5,
-            use_gaussian=True,
-            use_mirroring=False,  # False is faster but less accurate
-            perform_everything_on_device=False,
+            use_mirroring=False,
             device=self.device,
             verbose=False,
             verbose_preprocessing=False,
             allow_tqdm=False
         )
         # Initialize the network architecture, loads the checkpoint
-        self.predictor.initialize_from_trained_model_folder(
-            "/opt/ml/model/Dataset012_diag_pancreasCT/nnUNetTrainer_Lovasz__nnUNetPlans__3d_fullres",
-            use_folds= (0,),
+        predictor.initialize_from_trained_model_folder(
+            f"/opt/ml/model/{dataset}/nnUNetTrainer_Lovasz__nnUNetPlans__3d_fullres",
+            use_folds=(0,),
             checkpoint_name="checkpoint_best.pth",
         )
-        # base model
         end_model_load_time = time.time()
         print(
-            f"Base model loading runtime: {end_model_load_time - start_model_load_time}s")
+            f"Bone model loading runtime: {end_model_load_time - start_model_load_time}s")
+        return predictor
+
+    def load_models(self):
+        self.predictor_pancreas = self.load_model("Dataset012_diag_pancreasCT")
+        self.predictor_colon = self.load_model("Dataset103_Colon")
+        self.predictor_other = self.load_model("Dataset109_Other")
+        self.predictor_abdominal = self.load_model("Dataset101_Abdominal")
 
     def load_data(self):
         """
@@ -255,11 +237,21 @@ class Uls23(SegmentationAlgorithm):
             print(
                 f'\nPredicting image of shape: {voi.shape}, spacing: {voi_spacing}')
             
-            if class_label == 1:  # 1 equals Bone
-                predictions.append(self.predictor_bone.predict_single_npy_array(
+            match class_label:
+                case 0:
+                    predictions.append(self.predictor_abdominal.predict_single_npy_array(
                     voi, {'spacing': voi_spacing}, None, None, False))
-            else:
-                predictions.append(self.predictor.predict_single_npy_array(
+                case 6:
+                    predictions.append(self.predictor_other.predict_single_npy_array(
+                    voi, {'spacing': voi_spacing}, None, None, False))
+                case 7:
+                    predictions.append(self.predictor_pancreas.predict_single_npy_array(
+                    voi, {'spacing': voi_spacing}, None, None, False))
+                case 8:
+                    predictions.append(self.predictor_colon.predict_single_npy_array(
+                    voi, {'spacing': voi_spacing}, None, None, False))
+                case _:
+                    predictions.append(self.predictor_pancreas.predict_single_npy_array(
                     voi, {'spacing': voi_spacing}, None, None, False))
 
         end_inference_time = time.time()
@@ -282,7 +274,7 @@ class Uls23(SegmentationAlgorithm):
 
             print(
                 f'\nPredicting image of shape: {voi.shape}, spacing: {voi_spacing}')
-            predictions.append(self.predictor.predict_single_npy_array(
+            predictions.append(self.predictor_pancreas.predict_single_npy_array(
                 voi, {'spacing': voi_spacing}, None, None, False))
 
         end_inference_time = time.time()
