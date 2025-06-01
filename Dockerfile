@@ -3,40 +3,39 @@ FROM nvidia/cuda:12.2.0-runtime-ubuntu20.04 AS base
 RUN rm /etc/apt/sources.list.d/cuda.list
 
 RUN apt-get update && \
-  apt-get clean && \
-  apt-get install -y software-properties-common && \
+  apt-get install --fix-missing -y software-properties-common && \
   add-apt-repository ppa:deadsnakes/ppa && \
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
   git \
   wget \
   unzip \
+  curl \
   libopenblas-dev \
-  python3.9 \
-  python3.9-dev \
-  python3-pip \
-  nano \
-  && \
+  python3.10 \
+  python3.10-distutils \
+  python3.10-dev \
+  nano && \
+  # https://pip.pypa.io/en/stable/installation/ ensurepip did not work as well as the other pip installation :(
+  curl -sS https://bootstrap.pypa.io/get-pip.py -o get-pip.py && \
+  python3.10 get-pip.py && \
+  rm get-pip.py && \
   apt-get clean autoclean && \
   apt-get autoremove -y && \
   rm -rf /var/lib/apt/lists/*
 
+
 # Upgrade pip
-RUN python3.9 -m pip install --no-cache-dir --upgrade pip
+RUN python3.10 -m pip install --no-cache-dir --upgrade pip
 COPY requirements.txt /tmp/requirements.txt
-RUN python3.9 -m pip install --no-cache-dir -r /tmp/requirements.txt -f https://download.pytorch.org/whl/torch_stable.html
+RUN python3.10 -m pip install --no-cache-dir -r /tmp/requirements.txt -f https://download.pytorch.org/whl/torch_stable.html
 
 # Configure Git, clone the repository without checking out, then checkout the specific commit
-RUN git config --global advice.detachedHead false && \
-    git clone --no-checkout https://github.com/MIC-DKFZ/nnUNet.git /opt/algorithm/nnunet/ && \
-    cd /opt/algorithm/nnunet/ && \
-    git checkout 947eafbb9adb5eb06b9171330b4688e006e6f301
+RUN git clone https://github.com/Rijkkie/nnUNet_ULS23.git /opt/algorithm/nnunet/
 
 # Install a few dependencies that are not automatically installed
-RUN pip3 install \
+RUN python3.10 -m pip install \
         -e /opt/algorithm/nnunet \
-        graphviz \
-        onnx \
-        SimpleITK && \
+        onnx && \
     rm -rf ~/.cache/pip
 
 ### USER
@@ -57,9 +56,6 @@ COPY --chown=user:user export2onnx.py /opt/app/
 
 ### ALGORITHM
 
-# Copy custom trainers to docker
-COPY --chown=user:user ./architecture/extensions/nnunetv2/ /opt/algorithm/nnunet/nnunetv2/
-
 # Copy model checkpoint to docker (uncomment if you put the model weights directly in this repo)
 # COPY --chown=user:user ./architecture/nnUNet_results/ /opt/ml/model/
 
@@ -71,4 +67,4 @@ ENV nnUNet_raw="/opt/algorithm/nnunet/nnUNet_raw" \
     nnUNet_preprocessed="/opt/algorithm/nnunet/nnUNet_preprocessed" \
     nnUNet_results="/opt/algorithm/nnunet/nnUNet_results"
 
-ENTRYPOINT [ "python3.9", "-m", "process" ]
+ENTRYPOINT [ "python3.10", "-m", "process" ]

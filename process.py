@@ -81,8 +81,10 @@ class Uls23(SegmentationAlgorithm):
         self.z_size_model = 64  # Number of voxels in the z-dimension that the model takes
         self.xy_size_model = 128  # Number of voxels in the xy-dimensions that the model takes
         self.device = torch.device("cuda")
-        self.predictor = None  # nnUnet predictor
-        self.predictor_bone = None
+        self.predictor_other = None  # nnUnet predictor
+        self.predictor_pancreas = None
+        self.predictor_colon = None
+        self.predictor_abdominal = None
         self.estimators = self.load_estimators()
 
     def load_estimators(self):
@@ -106,54 +108,36 @@ class Uls23(SegmentationAlgorithm):
 
         end_time = time.time()
         print(f"Total job runtime: {end_time - start_time}s")
-
-    def load_models(self):
+        
+    def load_model(self, dataset):
         start_model_load_time = time.time()
-
+        print("start")
         # Set up the nnUNetPredictor
-        self.predictor_bone = nnUNetPredictor(
+        predictor = nnUNetPredictor(
             tile_step_size=0.5,
             use_gaussian=True,
-            use_mirroring=False,  # False is faster but less accurate
+            use_mirroring=False,
             device=self.device,
             verbose=False,
             verbose_preprocessing=False,
             allow_tqdm=False
         )
         # Initialize the network architecture, loads the checkpoint
-        self.predictor_bone.initialize_from_trained_model_folder(
-            "/opt/ml/model/Dataset031_Bone/nnUNetTrainer_100epochs__nnUNetPlans__3d_fullres",
-            use_folds=(0,1,2,3,4),
+        predictor.initialize_from_trained_model_folder(
+            f"/opt/ml/model/{dataset}/nnUNetTrainer_Lovasz__nnUNetPlans__3d_fullres",
+            use_folds=(0,),
             checkpoint_name="checkpoint_best.pth",
         )
         end_model_load_time = time.time()
         print(
             f"Bone model loading runtime: {end_model_load_time - start_model_load_time}s")
-        
-        # Expert model (trained on only Bone)
-        
-        start_model_load_time = time.time()
+        return predictor
 
-        # Set up the nnUNetPredictor
-        self.predictor = nnUNetPredictor(
-            tile_step_size=0.5,
-            use_gaussian=True,
-            use_mirroring=False,  # False is faster but less accurate
-            device=self.device,
-            verbose=False,
-            verbose_preprocessing=False,
-            allow_tqdm=False
-        )
-        # Initialize the network architecture, loads the checkpoint
-        self.predictor.initialize_from_trained_model_folder(
-            "/opt/ml/model/Dataset601_Full_128_64/nnUNetTrainer_ULS_500_QuarterLR__nnUNetPlans_shallow__3d_fullres_resenc",
-            use_folds= ("all"),
-            checkpoint_name="checkpoint_best.pth",
-        )
-        # base model
-        end_model_load_time = time.time()
-        print(
-            f"Base model loading runtime: {end_model_load_time - start_model_load_time}s")
+    def load_models(self):
+        self.predictor_pancreas = self.load_model("Dataset012_diag_pancreasCT")
+        self.predictor_colon = self.load_model("Dataset103_Colon")
+        self.predictor_other = self.load_model("Dataset109_Other")
+        self.predictor_abdominal = self.load_model("Dataset101_Abdominal")
 
     def load_data(self):
         """
@@ -242,26 +226,32 @@ class Uls23(SegmentationAlgorithm):
 
         for i, voi_spacing in enumerate(spacings):
             # Load the 3D array from the binary file
-            numpy_voi = np.load(f"/tmp/voi_{i}.npy")
-
+            voi = np.load(f"/tmp/voi_{i}.npy").astype(np.float32)
+            
             # Predict class
-            x = images_from_numpy(numpy_voi[0, :, :, :])
+            x = images_from_numpy(voi[0, :, :, :])
             class_label = int(np.argmax(
                 (sum(estimator.predict_proba([x]) for estimator in self.estimators))))
-
-            
-            voi = torch.from_numpy(numpy_voi)
-            voi = voi.to(dtype=torch.float32)
 
 
             print(
                 f'\nPredicting image of shape: {voi.shape}, spacing: {voi_spacing}')
             
-            if class_label == 1:  # 1 equals Bone
-                predictions.append(self.predictor_bone.predict_single_npy_array(
+            match class_label:
+                case 0:
+                    predictions.append(self.predictor_abdominal.predict_single_npy_array(
                     voi, {'spacing': voi_spacing}, None, None, False))
-            else:
-                predictions.append(self.predictor.predict_single_npy_array(
+                case 6:
+                    predictions.append(self.predictor_other.predict_single_npy_array(
+                    voi, {'spacing': voi_spacing}, None, None, False))
+                case 7:
+                    predictions.append(self.predictor_pancreas.predict_single_npy_array(
+                    voi, {'spacing': voi_spacing}, None, None, False))
+                case 8:
+                    predictions.append(self.predictor_colon.predict_single_npy_array(
+                    voi, {'spacing': voi_spacing}, None, None, False))
+                case _:
+                    predictions.append(self.predictor_pancreas.predict_single_npy_array(
                     voi, {'spacing': voi_spacing}, None, None, False))
 
         end_inference_time = time.time()
@@ -280,14 +270,11 @@ class Uls23(SegmentationAlgorithm):
 
         for i, voi_spacing in enumerate(spacings):
             # Load the 3D array from the binary file
-            numpy_voi = np.load(f"/tmp/voi_{i}.npy")
-
-            voi = torch.from_numpy(numpy_voi)
-            voi = voi.to(dtype=torch.float32)
+            voi = np.load(f"/tmp/voi_{i}.npy").astype(np.float32)
 
             print(
                 f'\nPredicting image of shape: {voi.shape}, spacing: {voi_spacing}')
-            predictions.append(self.predictor.predict_single_npy_array(
+            predictions.append(self.predictor_pancreas.predict_single_npy_array(
                 voi, {'spacing': voi_spacing}, None, None, False))
 
         end_inference_time = time.time()
