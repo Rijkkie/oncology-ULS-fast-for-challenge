@@ -101,7 +101,7 @@ class Uls23(SegmentationAlgorithm):
         os.makedirs("/output/images/ct-binary-uls/", exist_ok=True)
         self.load_models()
         spacings = self.load_data()
-        predictions = self.predict_with_classifier(spacings)
+        predictions = self.predict(spacings)
         self.postprocess(predictions)
 
         end_time = time.time()
@@ -109,22 +109,23 @@ class Uls23(SegmentationAlgorithm):
 
     def load_models(self):
         start_model_load_time = time.time()
-
+        print("start")
         # Set up the nnUNetPredictor
         self.predictor_bone = nnUNetPredictor(
             tile_step_size=0.5,
             use_gaussian=True,
-            use_mirroring=False,  # False is faster but less accurate
+            use_mirroring=True,
+            perform_everything_on_device=False,
             device=self.device,
             verbose=False,
             verbose_preprocessing=False,
-            allow_tqdm=False
+            allow_tqdm=True
         )
         # Initialize the network architecture, loads the checkpoint
         self.predictor_bone.initialize_from_trained_model_folder(
-            "/opt/ml/model/Dataset031_Bone/nnUNetTrainer_100epochs__nnUNetPlans__3d_fullres",
-            use_folds=(0,1,2,3,4),
-            checkpoint_name="checkpoint_best.pth",
+            "/opt/ml/model/Dataset012_diag_pancreasCT/nnUNetTrainer_Tversky__nnUNetPlans__3d_fullres",
+            use_folds=(0,),
+            checkpoint_name="checkpoint_final.pth",
         )
         end_model_load_time = time.time()
         print(
@@ -139,6 +140,7 @@ class Uls23(SegmentationAlgorithm):
             tile_step_size=0.5,
             use_gaussian=True,
             use_mirroring=False,  # False is faster but less accurate
+            perform_everything_on_device=False,
             device=self.device,
             verbose=False,
             verbose_preprocessing=False,
@@ -146,8 +148,8 @@ class Uls23(SegmentationAlgorithm):
         )
         # Initialize the network architecture, loads the checkpoint
         self.predictor.initialize_from_trained_model_folder(
-            "/opt/ml/model/Dataset601_Full_128_64/nnUNetTrainer_ULS_500_QuarterLR__nnUNetPlans_shallow__3d_fullres_resenc",
-            use_folds= ("all"),
+            "/opt/ml/model/Dataset012_diag_pancreasCT/nnUNetTrainer_Lovasz__nnUNetPlans__3d_fullres",
+            use_folds= (0,),
             checkpoint_name="checkpoint_best.pth",
         )
         # base model
@@ -242,16 +244,12 @@ class Uls23(SegmentationAlgorithm):
 
         for i, voi_spacing in enumerate(spacings):
             # Load the 3D array from the binary file
-            numpy_voi = np.load(f"/tmp/voi_{i}.npy")
-
+            voi = np.load(f"/tmp/voi_{i}.npy").astype(np.float32)
+            
             # Predict class
-            x = images_from_numpy(numpy_voi[0, :, :, :])
+            x = images_from_numpy(voi[0, :, :, :])
             class_label = int(np.argmax(
                 (sum(estimator.predict_proba([x]) for estimator in self.estimators))))
-
-            
-            voi = torch.from_numpy(numpy_voi)
-            voi = voi.to(dtype=torch.float32)
 
 
             print(
@@ -280,10 +278,7 @@ class Uls23(SegmentationAlgorithm):
 
         for i, voi_spacing in enumerate(spacings):
             # Load the 3D array from the binary file
-            numpy_voi = np.load(f"/tmp/voi_{i}.npy")
-
-            voi = torch.from_numpy(numpy_voi)
-            voi = voi.to(dtype=torch.float32)
+            voi = np.load(f"/tmp/voi_{i}.npy").astype(np.float32)
 
             print(
                 f'\nPredicting image of shape: {voi.shape}, spacing: {voi_spacing}')
